@@ -1,0 +1,22 @@
+# Node modules folder
+node_modules/
+
+# Environment variables
+.env
+
+# Uploads folder (user uploaded files)
+uploads/
+
+# Log files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS system files
+.DS_Store
+Thumbs.db
+
+# Optional: if you add coverage or build folders later
+# coverage/
+# dist/
