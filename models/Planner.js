@@ -1,4 +1,3 @@
-// models/Planner.js
 const mongoose = require('mongoose');
 
 const daySchema = new mongoose.Schema({
@@ -7,7 +6,7 @@ const daySchema = new mongoose.Schema({
   dinner: { type: mongoose.Schema.Types.ObjectId, ref: 'Recipe', default: null },
   snacks: { type: mongoose.Schema.Types.ObjectId, ref: 'Recipe', default: null },
   dessert: { type: mongoose.Schema.Types.ObjectId, ref: 'Recipe', default: null },
-});
+}, { _id: false });
 
 const plannerSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },

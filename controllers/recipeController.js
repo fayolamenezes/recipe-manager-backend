@@ -28,7 +28,7 @@ const createRecipe = async (req, res) => {
       instructions,
       image: imagePath,
       tag,
-      author: req.user.id,
+      createdBy: req.user._id,
     });
 
     const saved = await newRecipe.save();
@@ -50,7 +50,7 @@ const getAllPublicRecipes = async (req, res) => {
     };
 
     let recipesQuery = Recipe.find(filter)
-      .populate('author', 'name')
+      .populate('createdBy', 'name')
       .populate('comments.user', 'username');
 
     switch (sort) {
@@ -99,15 +99,16 @@ const addComment = async (req, res) => {
     };
 
     recipe.comments.push(comment);
-
-    // Update commentsCount field
     recipe.commentsCount = recipe.comments.length;
 
     await recipe.save();
 
-    await recipe.populate('comments.user', 'username');
+    // Re-query with populate
+    const updatedRecipe = await Recipe.findById(recipeId).populate('comments.user', 'name');
 
-    res.status(201).json(recipe.comments);
+    console.log('Populated comments after add:', updatedRecipe.comments);
+
+    res.status(201).json(updatedRecipe.comments);
   } catch (error) {
     console.error('Error adding comment:', error);
     res.status(500).json({ message: 'Failed to add comment' });
@@ -118,7 +119,7 @@ const addComment = async (req, res) => {
 const getRecipeById = async (req, res) => {
   try {
     const recipe = await Recipe.findById(req.params.recipeId)
-      .populate('author', 'name')
+      .populate('createdBy', 'name')
       .populate('comments.user', 'username');
 
     if (!recipe) {
@@ -171,6 +172,10 @@ const rateRecipe = async (req, res) => {
     const avgRating =
       recipe.ratings.reduce((acc, r) => acc + r.value, 0) / recipe.ratings.length;
 
+    recipe.averageRating = avgRating;
+
+    await recipe.save();
+
     res.status(200).json({
       message: 'Rating submitted',
       averageRating: avgRating.toFixed(2),
@@ -192,25 +197,26 @@ const toggleLike = async (req, res) => {
     const recipe = await Recipe.findById(recipeId);
     if (!recipe) return res.status(404).json({ message: 'Recipe not found' });
 
-    const index = recipe.likes.indexOf(userId);
+    const index = recipe.likes.findIndex(
+      (likeUserId) => likeUserId.toString() === userId.toString()
+    );
 
     if (index === -1) {
-      // Not liked yet, add like
+      // Not liked yet
       recipe.likes.push(userId);
     } else {
-      // Already liked, remove like (unlike)
+      // Already liked, remove
       recipe.likes.splice(index, 1);
     }
 
-    // Update likesCount field
     recipe.likesCount = recipe.likes.length;
 
     await recipe.save();
 
-    res.json({ 
+    res.json({
       message: index === -1 ? 'Recipe liked' : 'Recipe unliked',
       likesCount: recipe.likesCount,
-      likes: recipe.likes
+      likes: recipe.likes,
     });
   } catch (error) {
     console.error('Error toggling like:', error);
@@ -220,17 +226,24 @@ const toggleLike = async (req, res) => {
 
 const getTopRecipesOfDay = async (req, res) => {
   try {
-    // Start of today (midnight)
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
+    // Start of the week (Monday midnight)
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // Sunday = 0, Monday = 1 ...
+    const diffToMonday = (dayOfWeek === 0 ? 6 : dayOfWeek - 1); // days since Monday
+    const startOfWeek = new Date(now);
+    startOfWeek.setHours(0, 0, 0, 0);
+    startOfWeek.setDate(now.getDate() - diffToMonday);
 
-    // Get all recipes created today
-    const recipes = await Recipe.find({ createdAt: { $gte: startOfDay } })
-      .populate('author', 'name')
+    // Get all public recipes created since start of week
+    const recipes = await Recipe.find({
+      createdAt: { $gte: startOfWeek },
+      isPrivate: { $ne: true } // exclude private recipes
+    })
+      .populate('createdBy', 'name')
       .populate('comments.user', 'username')
-      .lean(); // use lean for better performance (plain JS objects)
+      .lean();
 
-    // Calculate score for each recipe: likes count + avg rating (weighted)
+    // Calculate score for each recipe: likes count * 2 + avg rating * 3
     const scoredRecipes = recipes.map(recipe => {
       const likesCount = recipe.likes ? recipe.likes.length : 0;
 
@@ -240,7 +253,6 @@ const getTopRecipesOfDay = async (req, res) => {
         avgRating = totalRating / recipe.ratings.length;
       }
 
-      // Weight: let's say likes count * 2 + avg rating * 3 (you can adjust weights)
       const score = likesCount * 2 + avgRating * 3;
 
       return { ...recipe, score };
@@ -278,19 +290,62 @@ const createPrivateRecipe = async (req, res) => {
       instructions,
       image: imagePath,
       tag,
-      author: req.user.id,
-      isPublic: false,  // Mark as private
+      createdBy: req.user._id, // ✅ matches model now
+      isPrivate: true,
+      isPublic: false, // optional redundancy
     });
 
     const savedRecipe = await newRecipe.save();
 
-    // Optionally, also add the recipe to the user's saved library field (if you keep track of saved recipes in User model)
-    await User.findByIdAndUpdate(req.user.id, { $addToSet: { savedRecipes: savedRecipe._id } });
+    // ✅ Add recipe to user's `recipes` list (personal)
+    await User.findByIdAndUpdate(req.user._id, {
+      $addToSet: { recipes: savedRecipe._id }
+    });
 
     res.status(201).json(savedRecipe);
   } catch (error) {
     console.error('Error creating private recipe:', error);
     res.status(500).json({ message: 'Failed to create private recipe' });
+  }
+};
+
+// Controller to get private recipes for logged-in user
+const getPrivateRecipes = async (req, res) => {
+  try {
+    const userId = req.user._id ; // or req.user._id
+
+    const privateRecipes = await Recipe.find({ createdBy: userId, isPublic: false });
+
+    res.status(200).json(privateRecipes);
+  } catch (error) {
+    console.error('Error fetching private recipes:', error);
+    res.status(500).json({ message: 'Server error fetching private recipes' });
+  }
+};
+
+const deletePrivateRecipe = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const recipeId = req.params.id;
+
+    // Find the recipe by id
+    const recipe = await Recipe.findById(recipeId);
+
+    if (!recipe) {
+      return res.status(404).json({ message: 'Recipe not found' });
+    }
+
+    // Check if the logged-in user is the author
+    if (recipe.createdBy.toString() !== userId.toString()) {
+      return res.status(403).json({ message: 'Not authorized to delete this recipe' });
+    }
+
+    // Delete the recipe
+    await Recipe.findByIdAndDelete(recipeId);
+
+    res.status(200).json({ message: 'Recipe deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error deleting private recipe' });
   }
 };
 
@@ -300,7 +355,7 @@ const deleteRecipeByOwner = async (req, res) => {
     const recipe = await Recipe.findById(recipeId);
     if (!recipe) return res.status(404).json({ message: 'Recipe not found' });
 
-    if (recipe.author.toString() !== req.user._id.toString()) {
+    if (recipe.createdBy.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Not authorized to delete this recipe' });
     }
 
@@ -363,9 +418,20 @@ const deleteRating = async (req, res) => {
     // Filter out the rating
     recipe.ratings = recipe.ratings.filter((r) => r._id.toString() !== ratingId);
 
+    // Update ratingsCount
+    recipe.ratingsCount = recipe.ratings.length;
+
+    // Recalculate average rating or reset if no ratings left
+    if (recipe.ratings.length > 0) {
+      const avgRating = recipe.ratings.reduce((acc, r) => acc + r.value, 0) / recipe.ratings.length;
+      recipe.averageRating = avgRating;
+    } else {
+      recipe.averageRating = null; // or 0 if you prefer
+    }
+
     await recipe.save();
 
-    res.json({ message: 'Rating deleted successfully' });
+    res.json({ message: 'Rating deleted successfully', averageRating: recipe.averageRating });
   } catch (error) {
     console.error('Error deleting rating:', error);
     res.status(500).json({ message: 'Failed to delete rating' });
@@ -380,9 +446,11 @@ const searchRecipes = async (req, res) => {
       return res.status(400).json({ message: 'Search query is required' });
     }
 
-    const results = await Recipe.find(
-      { $text: { $search: query }, isPublic: true } // Only public recipes
-    );
+    // Use regex for partial, case-insensitive matching on recipe title
+    const results = await Recipe.find({
+      title: { $regex: query, $options: 'i' },
+      isPublic: true,
+    });
 
     res.json(results);
   } catch (error) {
@@ -404,4 +472,6 @@ module.exports = {
   deleteCommentByUser,
   deleteRating,
   searchRecipes,
+  getPrivateRecipes,
+  deletePrivateRecipe,
 };

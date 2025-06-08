@@ -21,7 +21,7 @@ const recipeSchema = new mongoose.Schema({
   image: {
     type: String, // URL of the image
   },
-  author: {
+  createdBy: { // Renamed from 'author'
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true,
@@ -30,7 +30,7 @@ const recipeSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
-  comments: [commentSchema], // Using nested comment schema
+  comments: [commentSchema],
   ratings: [
     {
       user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -52,8 +52,12 @@ const recipeSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  isPrivate: { // Newly added
+    type: Boolean,
+    default: false,
+  },
 
-  // New count fields for sorting optimization
+  // Optimization fields
   likesCount: {
     type: Number,
     default: 0,

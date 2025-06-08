@@ -1,8 +1,9 @@
-// controllers/userController.js
 const User = require('../models/User');
 const Recipe = require('../models/Recipe');
 const Planner = require('../models/Planner');
+const mongoose = require('mongoose');
 
+// Existing function: returns privateRecipes + savedPublicRecipes
 const getSavedRecipes = async (req, res) => {
   try {
     const user = await User.findById(req.user._id).populate('savedRecipes');
@@ -11,13 +12,41 @@ const getSavedRecipes = async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    res.json(user.savedRecipes);
+    const privateRecipes = await Recipe.find({ createdBy: req.user._id, isPublic: false }).sort({ createdAt: -1 });
+
+    res.json({
+      privateRecipes,
+      savedPublicRecipes: user.savedRecipes || [],
+    });
   } catch (err) {
-    console.error('Error fetching saved recipes:', err);
+    console.error('Error fetching recipe library:', err);
+    res.status(500).json({ message: 'Failed to fetch recipe library' });
+  }
+};
+
+// NEW: simple endpoint to fetch only saved recipes
+const getUserSavedRecipesOnly = async (req, res) => {
+  try {
+    // Check if user info exists in request (from auth middleware)
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    // Find user and populate only the savedRecipes field with title and _id
+    const user = await User.findById(req.user._id).populate('savedRecipes', 'title _id');
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Return the populated savedRecipes array
+    res.json(user.savedRecipes);
+  } catch (error) {
+    console.error('Error in getUserSavedRecipesOnly:', error);
     res.status(500).json({ message: 'Failed to fetch saved recipes' });
   }
 };
 
+// Unified removeSavedRecipe function (replaces unsaveRecipeFromLibrary)
 const removeSavedRecipe = async (req, res) => {
   try {
     const { recipeId } = req.params;
@@ -25,12 +54,20 @@ const removeSavedRecipe = async (req, res) => {
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
-    user.savedRecipes = user.savedRecipes.filter(
-      (id) => id.toString() !== recipeId
-    );
+    if (user.savedRecipes.includes(recipeId)) {
+      user.savedRecipes = user.savedRecipes.filter(
+        (id) => id.toString() !== recipeId
+      );
 
-    await user.save();
-    res.status(200).json({ message: 'Recipe removed from saved list' });
+      await user.save();
+
+      // Decrement savedByCount on Recipe
+      await Recipe.findByIdAndUpdate(recipeId, { $inc: { savedByCount: -1 } });
+
+      res.status(200).json({ message: 'Recipe removed from your library' });
+    } else {
+      res.status(400).json({ message: 'Recipe not found in your library' });
+    }
   } catch (err) {
     console.error('Error removing saved recipe:', err);
     res.status(500).json({ message: 'Failed to remove saved recipe' });
@@ -94,11 +131,11 @@ const getBulkGroceryList = async (req, res) => {
 const savePlanner = async (req, res) => {
   try {
     const userId = req.user._id;
-    const { days } = req.body;
+    const { week } = req.body;  // changed from days to week to match schema
 
     // Flatten all recipe IDs from planner data
     const selectedRecipeIds = [];
-    for (const day of Object.values(days)) {
+    for (const day of Object.values(week)) {
       for (const meal of Object.values(day)) {
         if (meal) selectedRecipeIds.push(meal);
       }
@@ -124,10 +161,10 @@ const savePlanner = async (req, res) => {
     let planner = await Planner.findOne({ user: userId });
 
     if (planner) {
-      planner.days = days;
+      planner.week = week;  // update week, not days
       await planner.save();
     } else {
-      planner = await Planner.create({ user: userId, days });
+      planner = await Planner.create({ user: userId, week });  // create with week
     }
 
     res.status(200).json({ message: 'Planner saved successfully', planner });
@@ -156,49 +193,74 @@ const searchSavedRecipes = async (req, res) => {
 const saveRecipeToLibrary = async (req, res) => {
   try {
     const { recipeId } = req.params;
-    const user = await User.findById(req.user._id);
 
-    if (!user.savedRecipes.includes(recipeId)) {
-      user.savedRecipes.push(recipeId);
-      await user.save();
+    console.log('Received recipeId:', recipeId);
 
-      // Increment savedByCount on Recipe
-      await Recipe.findByIdAndUpdate(recipeId, { $inc: { savedByCount: 1 } });
-
-      res.status(200).json({ message: 'Recipe saved to your library' });
-    } else {
-      res.status(400).json({ message: 'Recipe already saved' });
+    if (!mongoose.Types.ObjectId.isValid(recipeId)) {
+      console.log('❌ Invalid recipe ID');
+      return res.status(400).json({ message: 'Invalid recipe ID' });
     }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      console.log('❌ User not found:', req.user._id);
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const recipeObjectId = new mongoose.Types.ObjectId(recipeId);
+
+    const alreadySaved = user.savedRecipes.some(id => id.equals(recipeObjectId));
+    if (alreadySaved) {
+      console.log('❌ Recipe already saved:', recipeId);
+      return res.status(400).json({ message: 'Recipe already saved' });
+    }
+
+    const recipe = await Recipe.findById(recipeId);
+    if (!recipe) {
+      console.log('❌ Recipe not found in DB:', recipeId);
+      return res.status(404).json({ message: 'Recipe not found' });
+    }
+
+    console.log('✅ All checks passed. Saving recipe...');
+
+    user.savedRecipes.push(recipeObjectId);
+    await user.save();
+
+    recipe.savedByCount = (recipe.savedByCount || 0) + 1;
+    await recipe.save();
+
+    res.status(200).json({ message: 'Recipe saved to your library' });
   } catch (err) {
-    console.error('Error saving recipe:', err);
+    console.error('🔥 Error saving recipe:', err);
     res.status(500).json({ message: 'Failed to save recipe' });
   }
 };
 
-const unsaveRecipeFromLibrary = async (req, res) => {
+const getAllUserLibraryRecipes = async (req, res) => {
   try {
-    const { recipeId } = req.params;
-    const user = await User.findById(req.user._id);
+    const user = await User.findById(req.user.id)
+      .populate('savedRecipes') // ✅ Show ALL saved recipes, public or private
+      .populate({
+        path: 'recipes', // ✅ Your own private recipes
+        match: { isPrivate: true } // ← assuming you use this flag
+      });
 
-    if (user.savedRecipes.includes(recipeId)) {
-      user.savedRecipes = user.savedRecipes.filter(id => id.toString() !== recipeId);
-      await user.save();
+    const savedPublicRecipes = user.savedRecipes || [];
+    const privateRecipes = user.recipes || [];
 
-      // Decrement savedByCount on Recipe
-      await Recipe.findByIdAndUpdate(recipeId, { $inc: { savedByCount: -1 } });
-
-      res.status(200).json({ message: 'Recipe removed from your library' });
-    } else {
-      res.status(400).json({ message: 'Recipe not found in your library' });
-    }
+    res.json({
+      savedPublicRecipes,
+      privateRecipes
+    });
   } catch (err) {
-    console.error('Error removing recipe:', err);
-    res.status(500).json({ message: 'Failed to remove recipe' });
+    console.error('Error fetching user library:', err);
+    res.status(500).json({ message: 'Failed to fetch library' });
   }
 };
 
 module.exports = {
   getSavedRecipes,
+  getUserSavedRecipesOnly,  // NEW export
   removeSavedRecipe,
   isRecipeSaved,
   getSavedRecipesForGrocery,
@@ -206,5 +268,5 @@ module.exports = {
   savePlanner,
   searchSavedRecipes,
   saveRecipeToLibrary,
-  unsaveRecipeFromLibrary,
+  getAllUserLibraryRecipes,
 };

@@ -47,7 +47,7 @@ const unbanUser = async (req, res) => {
 const getAllRecipesForAdmin = async (req, res) => {
   try {
     const recipes = await Recipe.find()
-      .populate('author', 'name email')
+      .populate('createdBy', 'name email')
       .lean();
     res.json(recipes);
   } catch (error) {

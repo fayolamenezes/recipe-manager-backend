@@ -1,4 +1,3 @@
-// models/User.js
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
@@ -19,6 +18,13 @@ const userSchema = new mongoose.Schema({
     { 
       type: mongoose.Schema.Types.ObjectId, 
       ref: 'Recipe' 
+    }
+  ],
+  // ✅ Add this field
+  recipes: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Recipe'
     }
   ],
   isAdmin: {
