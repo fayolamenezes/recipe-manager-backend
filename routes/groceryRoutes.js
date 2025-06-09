@@ -15,4 +15,7 @@ router.patch('/:itemId/toggle', authMiddleware, groceryController.toggleGroceryI
 // Export grocery list as PDF
 router.get('/export-pdf', authMiddleware, groceryController.exportGroceryListPDF);
 
+// DELETE a grocery item
+router.delete('/:itemId', authMiddleware, groceryController.deleteGroceryItem);
+
 module.exports = router;

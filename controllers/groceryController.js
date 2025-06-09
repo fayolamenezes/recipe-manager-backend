@@ -26,6 +26,9 @@ exports.toggleGroceryItemStatus = async (req, res) => {
 
     item.bought = !item.bought;
 
+    // Tell Mongoose we modified `items`
+    groceryList.markModified('items');
+
     // Reorder list: pending items first, bought items last
     groceryList.items.sort((a, b) => (a.bought === b.bought ? 0 : a.bought ? 1 : -1));
 
@@ -61,6 +64,30 @@ exports.createOrUpdateGroceryList = async (req, res) => {
   } catch (error) {
     console.error('Failed to save grocery list:', error);
     res.status(500).json({ message: 'Failed to save grocery list' });
+  }
+};
+
+exports.deleteGroceryItem = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const itemId = req.params.itemId;
+
+    const groceryList = await GroceryList.findOne({ user: userId });
+    if (!groceryList) {
+      return res.status(404).json({ message: 'Grocery list not found' });
+    }
+
+    // Remove the item
+    groceryList.items = groceryList.items.filter(
+      item => item._id.toString() !== itemId
+    );
+
+    await groceryList.save();
+
+    res.json({ items: groceryList.items });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Failed to delete item' });
   }
 };
 
