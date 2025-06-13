@@ -194,40 +194,33 @@ const saveRecipeToLibrary = async (req, res) => {
   try {
     const { recipeId } = req.params;
 
-    console.log('Received recipeId:', recipeId);
-
     if (!mongoose.Types.ObjectId.isValid(recipeId)) {
-      console.log('❌ Invalid recipe ID');
       return res.status(400).json({ message: 'Invalid recipe ID' });
     }
 
     const user = await User.findById(req.user._id);
     if (!user) {
-      console.log('❌ User not found:', req.user._id);
       return res.status(404).json({ message: 'User not found' });
     }
 
     const recipeObjectId = new mongoose.Types.ObjectId(recipeId);
-
     const alreadySaved = user.savedRecipes.some(id => id.equals(recipeObjectId));
     if (alreadySaved) {
-      console.log('❌ Recipe already saved:', recipeId);
       return res.status(400).json({ message: 'Recipe already saved' });
     }
 
     const recipe = await Recipe.findById(recipeId);
     if (!recipe) {
-      console.log('❌ Recipe not found in DB:', recipeId);
       return res.status(404).json({ message: 'Recipe not found' });
     }
 
-    console.log('✅ All checks passed. Saving recipe...');
-
+    // Save to user
     user.savedRecipes.push(recipeObjectId);
     await user.save();
 
-    recipe.savedByCount = (recipe.savedByCount || 0) + 1;
-    await recipe.save();
+    // Save to recipe
+    recipe.savedBy.addToSet(user._id);
+    await recipe.save(); // 🔁 Triggers pre('save') to update savedByCount
 
     res.status(200).json({ message: 'Recipe saved to your library' });
   } catch (err) {

@@ -25,6 +25,8 @@ app.use('/api/users', userRoutes);
 app.use('/api/recipes', recipeRoutes);
 app.use('/api/planner', plannerRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/chatbot', require('./routes/chatbot'));
+
 
 // Serve uploads folder statically
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));

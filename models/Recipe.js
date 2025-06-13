@@ -21,7 +21,7 @@ const recipeSchema = new mongoose.Schema({
   image: {
     type: String, // URL of the image
   },
-  createdBy: { // Renamed from 'author'
+  createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true,
@@ -52,10 +52,18 @@ const recipeSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
-  isPrivate: { // Newly added
+  isPrivate: {
     type: Boolean,
     default: false,
   },
+
+  // Users who saved the recipe
+  savedBy: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    }
+  ],
 
   // Optimization fields
   likesCount: {
@@ -74,6 +82,12 @@ const recipeSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+});
+
+// Auto-update savedByCount before saving
+recipeSchema.pre('save', function (next) {
+  this.savedByCount = this.savedBy?.length || 0;
+  next();
 });
 
 // Add text index

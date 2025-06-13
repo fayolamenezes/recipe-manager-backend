@@ -62,7 +62,7 @@ const deleteRecipe = async (req, res) => {
     const recipe = await Recipe.findById(req.params.id);
     if (!recipe) return res.status(404).json({ message: 'Recipe not found' });
 
-    await recipe.remove();
+    await recipe.deleteOne();
     res.json({ message: 'Recipe deleted successfully' });
   } catch (error) {
     console.error('Error deleting recipe:', error);
@@ -73,17 +73,18 @@ const deleteRecipe = async (req, res) => {
 // Get stats - example: top 5 most saved recipes
 const getStats = async (req, res) => {
   try {
-    // Aggregate top 5 recipes by how many users saved them
-    const mostSavedRecipes = await Recipe.aggregate([
-    {
-        $project: {
-        title: 1,
-        savedCount: { $size: { $ifNull: ["$savedByUsers", []] } },
-        }
-    },
-    { $sort: { savedCount: -1 } },
-    { $limit: 5 },
-    ]);
+    // Fetch top 5 recipes sorted by savedByCount field (numeric)
+    const mostSavedRecipesRaw = await Recipe.find({})
+      .sort({ savedByCount: -1 })
+      .limit(5)
+      .select('title savedByCount');
+
+    // Format to match expected `savedCount` property
+    const mostSavedRecipes = mostSavedRecipesRaw.map(recipe => ({
+      _id: recipe._id,
+      title: recipe.title,
+      savedCount: recipe.savedByCount || 0
+    }));
 
     const userCount = await User.countDocuments();
     const recipeCount = await Recipe.countDocuments();
@@ -95,6 +96,22 @@ const getStats = async (req, res) => {
   }
 };
 
+const deleteCommentByAdmin = async (req, res) => {
+  try {
+    const { commentId } = req.params;
+    const recipe = await Recipe.findOne({ 'comments._id': commentId });
+    if (!recipe) return res.status(404).json({ message: 'Comment not found' });
+
+    recipe.comments = recipe.comments.filter(c => c._id.toString() !== commentId);
+    await recipe.save();
+
+    res.status(200).json({ message: 'Comment deleted' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 module.exports = {
   getUsers,
   banUser,
@@ -102,4 +119,5 @@ module.exports = {
   getAllRecipesForAdmin,
   deleteRecipe,
   getStats,
+  deleteCommentByAdmin,
 };
